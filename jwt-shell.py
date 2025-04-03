@@ -4,8 +4,8 @@ import base64
 import os
 
 # Same secret key as the Go server
-SECRET = "<change me>"
-url = "<change me>"
+SECRET = "changeme"
+url = "changeme"
 
 chunk_size = 4096
 IFS = "${IFS}"  # Define {IFS}
@@ -52,26 +52,46 @@ def download(remote_path, local_path):
     print(f"Remote Path: {remote_path}")
     print(f"Local Path: {local_path}")
 
+    # Use a temporary file to save all Base64 encoded content
+    temp_b64_file = f"{os.path.basename(remote_path)}.b64"
+    remote_temp_b64_file = f"/tmp/{temp_b64_file}"
+
+    if os.path.exists(temp_b64_file):
+        print(f"❌ Temporary file {temp_b64_file} exists. Deleting it.")
+        os.remove(temp_b64_file)
+        
+    # Create an empty file
+    with open(temp_b64_file, "wb") as temp_file:
+        pass
+
+    # Check if remote file exists before proceeding
+    resp = run(f"test -f {remote_path}")
+    if "No such file" in resp:
+        print(f"❌ Remote file {remote_path} does not exist!")
+        return
+
     """Download remote file in chunks to local"""
-    resp = run(f"base64 -w 0 {remote_path}>{remote_path}.b64")
+    resp = run(f"base64 -w 0 {remote_path}>{remote_temp_b64_file}")
     if "No such file" in resp:
         print("❌ Remote file does not exist!")
         return
-    
-    # Use temporary file to save all Base64 encoded content
-    temp_b64_file = f"/tmp/{os.path.basename(remote_path)}.b64"
-    
-    with open(temp_b64_file, "wb") as f:
-        # Read all Base64 content of the file
-        b64_data = run(f"cat {remote_path}.b64")
-        total_chunks = (len(b64_data) + chunk_size - 1) // chunk_size  # Calculate the number of chunks
 
-        for chunk_index in range(total_chunks):
-            # Get corresponding Base64 chunk
-            chunk = b64_data[chunk_index * chunk_size: (chunk_index + 1) * chunk_size]
-            # Write chunk to file
-            f.write(chunk.encode())
-            print(f"📥 Chunk {chunk_index+1}/{total_chunks} downloaded")
+    # Initialize offset for each chunk
+    offset = 0
+
+    while True:
+        # Read the next chunk of Base64 data
+        chunk = run(f"dd if=\"{remote_temp_b64_file}\" bs={chunk_size} skip={offset} count=1")
+        # print(chunk)
+        if not chunk.strip():  # Check if chunk is empty, meaning end of file
+            break
+        
+        # Write the chunk to the temporary file
+        with open(temp_b64_file, "ab") as temp_file:  # Append mode
+            temp_file.write(chunk.encode())
+
+        offset += 1  # Move the offset forward by the chunk size
+        print(f"📥 Chunk {offset} downloaded")
             
     print(f"✅ File download complete, temporary file saved to {temp_b64_file}")
 
@@ -82,7 +102,7 @@ def download(remote_path, local_path):
             local_file.write(base64.b64decode(file_data))  # Decode and write the final file
     
     # Remove temporary files
-    run(f"rm {remote_path}.b64 {temp_b64_file}")
+    # run(f"rm {remote_temp_b64_file}")
     print(f"✅ Download and decode complete, saved to {local_path}")
 
     
